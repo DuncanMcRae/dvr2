@@ -7,7 +7,7 @@ import sys
 
 from socket_connections import Output_Connection
 
-LISTENER = ("127.0.0.1", 6666)
+LISTENER = ("127.0.0.1", 20002)
 
 
 def build_argparse():
@@ -42,7 +42,7 @@ def build_argparse():
 
 
 def send_control(connection: tuple, command: str):
-    _sock = Output_Connection()
+    _sock = Output_Connection("control", LISTENER[0], LISTENER[1])
     _sock.sock.sendto(command.encode(), connection)
 
 
