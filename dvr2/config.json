@@ -1,5 +1,5 @@
 {
-    "inputs": [
+    "cameras": [
         {
             "name": "camera1",
             "ip": "127.0.0.1",
@@ -11,11 +11,23 @@
             "port": 10002
         }
     ],
+    "inputs": [
+        {
+            "name": "overlay",
+            "ip": "127.0.0.1",
+            "port": 20001
+        },
+        {
+            "name": "controller",
+            "ip": "127.0.0.1",
+            "port": 20002
+        }
+    ],
     "outputs": [
         {
             "name": "output1",
             "ip": "127.0.0.1",
-            "port": 10003
+            "port": 30001
         }
     ],
     "debug_level": "info"

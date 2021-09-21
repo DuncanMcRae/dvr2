@@ -7,7 +7,7 @@ class Input_Connection:
     def __init__(self, name, host, port):
         self.name = name
         self.host = host
-        self.host = "0.0.0.0"
+        # self.host = "0.0.0.0"
         self.port = port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # used so it can stop start without locking up the ports
@@ -28,7 +28,7 @@ class Output_Connection:
 def main():
     # testing code
     logger = debug_logger.init_logger(__name__, "debug")
-    first = Input_Connection("0.0.0.0", 6666)
+    first = Input_Connection("test", "0.0.0.0", 6666)
 
 
 if __name__ == "__main__":

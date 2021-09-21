@@ -1,10 +1,12 @@
 import json
+from multiprocessing import Process, Queue
 
 import debug_logger
 import socket_connections
 
 
 def read_json(filepath):
+    print(filepath)
     with open(filepath, "r") as f:
         return json.load(f)
 
@@ -18,12 +20,23 @@ def get_connections(settings, logger):
         [list]: creates two lists: input and output. Each list contains the UDP socket information
         each incoming sensor or output
     """
+
     debug_level = settings["debug_level"]
-    inputs = []
-    for camera in settings["inputs"]:
-        inputs.append(
+    cameras = []
+    for camera in settings["cameras"]:
+        cameras.append(
             socket_connections.Input_Connection(
                 camera["name"], camera["ip"], camera["port"]
+            )
+        )
+        logger.info(
+            f"Camera connection created for {cameras[-1].name} @ {cameras[-1].host} on {cameras[-1].port}"
+        )
+    inputs = []
+    for input in settings["inputs"]:
+        inputs.append(
+            socket_connections.Input_Connection(
+                input["name"], input["ip"], input["port"]
             )
         )
         logger.info(
@@ -40,6 +53,10 @@ def get_connections(settings, logger):
             f"Output connection created to {outputs[-1].name} @ {outputs[-1].host} on {outputs[-1].port}"
         )
     return inputs, outputs
+
+
+def port_monitor():
+    pass
 
 
 def main():
