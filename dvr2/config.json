@@ -25,5 +25,5 @@
             "port": 30001
         }
     ],
-    "debug_level": "info"
+    "debug_level": "debug"
 }
