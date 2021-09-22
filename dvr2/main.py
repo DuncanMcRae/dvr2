@@ -97,6 +97,33 @@ def get_packets(sock, mask, lock, qs, settings, logger):
     timestamp = dt.datetime.now()
     data_packet = [timestamp, data_packet]
 
+    # spin over all the inputs
+    for idx, sensor in enumerate(settings["inputs"]):
+        # check which sensor corresponds to the incoming packets
+
+        if sensor_port == sensor["port"]:
+            # load the sensors assigned queue
+            q = qs[idx]
+
+            lock.acquire()
+            # if the queue is full, empty it
+            while not q.empty():
+                _ = q.get()
+            # on the off chance that the locks aren't working,
+            # just make sure the queue is empty
+            while q.full():
+                _ = q.get()
+            # the queue holds only one value.
+            # if it can't, it returns and error and moves on
+            if q.empty():
+                q.put(data_packet, block=False)
+                logger.debug(f"data put in q{idx}")
+            else:
+                # this should never happen
+                logger.warning(f"q{idx} was full; try again next time")
+
+            lock.release()
+
 
 def port_monitor(sel, lock, inputs, qs, settings, logger):
     """Infinite loop reacting when input sensor data hits the socket and is
