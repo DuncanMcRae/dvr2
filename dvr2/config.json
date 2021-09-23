@@ -34,5 +34,10 @@
             "port": 30001
         }
     ],
-    "debug_level": "debug"
+    "debug_level": "debug",
+    "log_length": {
+        "hour": 0,
+        "minute": 0,
+        "second": 20
+    }
 }

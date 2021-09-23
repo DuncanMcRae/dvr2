@@ -21,7 +21,7 @@ while True:
     overlay = timestamp
 
     for i in range(9):
-        val = rand_value(i * 10, i * 10 + 10)
+        val = round(rand_value(i * 10, i * 10 + 10), 3)
         if i == 8:
             val = "TASK: I'm the real Batman"
         overlay = overlay + "," + str(val)

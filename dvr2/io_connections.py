@@ -1,8 +1,9 @@
-import socket_connections
 from typing import List, Dict
 import logging
 import json
+
 import debug_logger
+import socket_connections
 
 
 def get_connections(
