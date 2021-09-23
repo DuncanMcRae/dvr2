@@ -1,63 +1,23 @@
+from typing import Dict, List
 import json
-from multiprocessing import Process, Queue, Lock
+import threading
+import queue
+import time
+import datetime
+import re
+import logging
 import selectors
-import datetime as dt
-
+import multiprocessing
+import io_connections
 import debug_logger
-import socket_connections
 
 
-def read_json(filepath):
-    print(filepath)
-    with open(filepath, "r") as f:
+def read_config_file(config: str) -> Dict:
+    with open(config, "r") as f:
         return json.load(f)
 
 
-def get_connections(settings, logger):
-    """creates all the UDP input and output UDP connections
-    each connection is an instance of the classes pulled from the socket_connections module.
-    Args:
-        settings (json object): the loaded settings file
-    Returns:
-        [list]: creates two lists: input and output. Each list contains the UDP socket information
-        each incoming sensor or output
-    """
-
-    debug_level = settings["debug_level"]
-    cameras = []
-    for camera in settings["cameras"]:
-        cameras.append(
-            socket_connections.Input_Connection(
-                camera["name"], camera["ip"], camera["port"]
-            )
-        )
-        logger.info(
-            f"Camera connection created for {cameras[-1].name} @ {cameras[-1].host} on {cameras[-1].port}"
-        )
-    inputs = []
-    for input in settings["inputs"]:
-        inputs.append(
-            socket_connections.Input_Connection(
-                input["name"], input["ip"], input["port"]
-            )
-        )
-        logger.info(
-            f"Input connection created for {inputs[-1].name} @ {inputs[-1].host} on {inputs[-1].port}"
-        )
-    outputs = []
-    for output in settings["outputs"]:
-        outputs.append(
-            socket_connections.Output_Connection(
-                output["name"], output["ip"], output["port"]
-            )
-        )
-        logger.info(
-            f"Output connection created to {outputs[-1].name} @ {outputs[-1].host} on {outputs[-1].port}"
-        )
-    return inputs, outputs
-
-
-def create_queues(_count, _logger):
+def create_queues(count, logger):
     """the program is multi-processing, so needs a means to pass information
     from one CPU to another; queues are utilised here to do this.
 
@@ -71,13 +31,28 @@ def create_queues(_count, _logger):
         [list]: containing all the multi-processing queues
     """
     queues = []
-    for num in range(_count):
-        queues.append(Queue(maxsize=1))
-        _logger.info(f"q{num} added to queue")
+    for num in range(count):
+        queues.append(multiprocessing.Queue(maxsize=1))
+        logger.info(f"q{num} added to queue")
     return queues
 
 
-def get_packets(sock, mask, lock, qs, settings, logger):
+def socket_server(settings: Dict, logger: logging.Logger, qs: List) -> None:
+    inputs = io_connections.get_connections(settings["inputs"], True, logger)
+    sel = selectors.DefaultSelector()
+    for conn in inputs:
+        sel.register(
+            fileobj=conn.sock, events=selectors.EVENT_READ, data=get_packets
+        )
+    while True:
+        events = sel.select(timeout=0)
+        for key, mask in events:
+            callback = key.data
+            callback(key.fileobj, mask, settings, logger, qs)
+
+
+def get_packets(sock, mask, settings, logger, qs):
+    print("\n")
     """called when the selector registers a socket has data ready for reading,
     this method then grabs the byte data and puts it in to the correct queue
 
@@ -94,91 +69,84 @@ def get_packets(sock, mask, lock, qs, settings, logger):
     logger.info(
         f"data_packet from {sensor_ip} on port {sensor_port}: {data_packet}"
     )
-    timestamp = dt.datetime.now()
+    timestamp = datetime.datetime.now()
     data_packet = [timestamp, data_packet]
 
     # spin over all the inputs
-    for idx, sensor in enumerate(settings["inputs"]):
+    for idx, input in enumerate(settings["inputs"]):
         # check which sensor corresponds to the incoming packets
 
-        if sensor_port == sensor["port"]:
+        if sensor_port == input["port"]:
             # load the sensors assigned queue
             q = qs[idx]
 
-            lock.acquire()
-            # if the queue is full, empty it
-            while not q.empty():
-                _ = q.get()
-            # on the off chance that the locks aren't working,
-            # just make sure the queue is empty
-            while q.full():
-                _ = q.get()
-            # the queue holds only one value.
-            # if it can't, it returns and error and moves on
-            if q.empty():
-                q.put(data_packet, block=False)
-                logger.debug(f"data put in q{idx}")
-            else:
-                # this should never happen
-                logger.warning(f"q{idx} was full; try again next time")
+            # lock.acquire()
+            # drain the q
+            while True:
+                try:
+                    old = q.get(block=False)
+                except queue.Empty:
+                    break
+            # put new data in q
+            q.put(data_packet, block=False)
+            logger.debug(f"data put in q{idx}")
+            # lock.release()
 
-            lock.release()
-
-
-def port_monitor(sel, lock, inputs, qs, settings, logger):
-    """Infinite loop reacting when input sensor data hits the socket and is
-    ready for reading. Callback get_packets method to check input verus configuration and place
-    in to the correct queue.
-    Args:
-        _sel (selectors BaseSelector): used for monitoring the the incoming sockets
-        _lock (multi-processing Lock): used to stop run-time errors happening when one process tries to get
-        data from a queue that it thought was full, but the other process just emptied.
-        _inputs (list): containing all the input socket connections
-        _qs (list): of the queues for passing between processes - one queue per input
-        _settings (json object): package configuration file
-    """
-
-    logger.info("port monitor called")
-
-    for conn in inputs:
-        sel.register(
-            fileobj=conn.sock, events=selectors.EVENT_READ, data=get_packets
-        )
-
-    while True:
-        events = sel.select(timeout=0)
-        for key, mask in events:
-            callback = key.data
-            callback(key.fileobj, mask, lock, qs, settings, logger)
+            if (
+                input["name"] == "controller"
+                and data_packet[1].decode() == "close"
+            ):
+                logger.info("closing program")
 
 
 def main():
-    # the multi-processing Lock stops run-time errors which occur when two processes
-    # work on the smae object - like queues. With the lock, the processes have to wait
-    # for the other process to be finished witht the queue
-    lock = Lock()
-    # initialise package variables
-    settings = read_json("config.json")
+    settings = read_config_file("config.json")
     debug_level = settings["debug_level"]
-    # initialises the debug logger
-    logger = debug_logger.init_logger(__name__, debug_level)
-    # gather all socket connections
-    inputs, outputs = get_connections(settings, logger)
-    # create queues that are used for io of socket data
-    qs = create_queues(len(inputs), logger)
-    # selectors are high-level efficient io multiplexing used to wait
-    # for io readiness on multiple file objects
-    sel = selectors.DefaultSelector()
-    # spool up a process, one for input monitoring (main) The get the lock for control,
-    # the list of socket connections for io, the queues for transfer of data
-    # and the settings file for various io and driver purposes
-    p1 = Process(
-        target=port_monitor, args=(sel, lock, inputs, qs, settings, logger)
+    log_length = settings["log_length"]
+    log_length = datetime.timedelta(
+        hours=int(log_length["hour"]),
+        minutes=int(log_length["minute"]),
+        seconds=int(log_length["second"]),
     )
-    # generic multi-processing requirements - kill child processes when program loop is terminated
-    p1.daemon = True
-    p1.start()
-    p1.join()
+    # logger_pass_queue = queue.Queue(maxsize=1)
+    log_name = debug_logger.get_new_log_file_name("log", "debug", "log")
+    logger = debug_logger.init_logger(__name__, debug_level, log_name)
+    # logger_pass_queue.put(logger)
+    qs = create_queues(len(settings["inputs"]), logger)
+
+    server_thread = threading.Thread(
+        name="socket_server",
+        target=socket_server,
+        args=(settings, logger, qs),
+    )
+    server_thread.start()
+
+    start_time = datetime.datetime.now()
+
+    while True:
+        current_time = datetime.datetime.now()
+
+        if current_time - start_time > log_length:
+            log_name = debug_logger.get_new_log_file_name(
+                "log", "debug", "log"
+            )
+            logger = debug_logger.update_handler(logger, log_name)
+            logger.info(f"logger init {log_name}")
+            start_time = current_time
+        else:
+            logger = logger
+
+        # logger.info(datetime.datetime.now())
+        # time.sleep(1)
+
+    #     msg = log_queue.get()
+    #     if msg == None:
+    #         logger.warning("breaking")
+    #         break
+    #     else:
+    #         logger.info(f"message rec {msg}")
+
+    # server_thread.join()
 
 
 if __name__ == "__main__":

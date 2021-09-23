@@ -5,12 +5,28 @@ import datetime
 import time
 import sys
 
-from socket_connections import Output_Connection
-
 LISTENER = ("127.0.0.1", 20002)
 
 
-def build_argparse():
+class Connection:
+    def __init__(self, name: str, host: str, port: int) -> None:
+        """[creates a UDP socket connection either input (with bind) or output]
+
+        Args:
+            name (str): [name of connection]
+            host (str): [ip address 'X.X.X.X']
+            port (int): [port number >1500]
+            logger (logging.Logger): [the logger for debug_logging]
+        """
+        self.name = name
+        self.host = host
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # used so it can stop start without locking up the ports
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+
+def build_argparse() -> argparse.ArgumentParser:
     # Create the parser
     parser = argparse.ArgumentParser(
         prog="dvr_controller",
@@ -20,14 +36,14 @@ def build_argparse():
     )
     # optional arguments start with '-' or '--'
     parser.add_argument("--version", action="version", version="%(prog) v2.0")
-    # set a new folder
+    # start recording
     parser.add_argument(
         "-s",
         "--start",
         action="store_true",
         help="start logging",
     )
-    # set a new project
+    # stop recording
     parser.add_argument(
         "-x",
         "--stop",
@@ -35,18 +51,24 @@ def build_argparse():
         help="stop logging",
     )
 
-    # parse dem args
-    args = parser.parse_args()
-    print(f"ARGS: {args}")
-    return args
+    # close program
+    parser.add_argument(
+        "-c",
+        "--close",
+        action="store_true",
+        help="close",
+    )
+
+    return parser
 
 
-def send_control(connection: tuple, command: str):
-    _sock = Output_Connection("control", LISTENER[0], LISTENER[1])
-    _sock.sock.sendto(command.encode(), connection)
+def send_control(connection: tuple, command: str) -> None:
+    sock = Connection("control", LISTENER[0], LISTENER[1])
+    sock.sock.sendto(command.encode(), connection)
 
 
-def main(args):
+def main(args) -> None:
+
     if len(sys.argv[:]) == 1:
         print("no command sent")
 
@@ -58,7 +80,14 @@ def main(args):
         print("stopping")
         send_control(LISTENER, "stop")
 
+    if args.close:
+        print("close")
+        send_control(LISTENER, "close")
+
 
 if __name__ == "__main__":
-    args = build_argparse()
+    parser = build_argparse()
+    # parse dem args
+    args = parser.parse_args()
+    print(f"ARGS: {args}")
     main(args)
