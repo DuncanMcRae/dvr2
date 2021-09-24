@@ -4,7 +4,6 @@ import threading
 import queue
 import time
 import datetime
-import re
 import logging
 import selectors
 import multiprocessing
@@ -25,7 +24,13 @@ def create_queues(count: int, logger: logging.Logger) -> List:
     return queues
 
 
-def socket_server(settings: Dict, logger: logging.Logger, qs: List) -> None:
+def socket_server(
+    settings: Dict,
+    logger: logging.Logger,
+    qs: List,
+    command_q: queue.Queue,
+    socket_control_q: queue.Queue,
+) -> None:
     inputs = io_connections.get_connections(settings["inputs"], True, logger)
     sel = selectors.DefaultSelector()
     for conn in inputs:
@@ -33,14 +38,44 @@ def socket_server(settings: Dict, logger: logging.Logger, qs: List) -> None:
             fileobj=conn.sock, events=selectors.EVENT_READ, data=get_packets
         )
     while True:
+        if not socket_control_q.empty():
+            command = socket_control_q.get()
+            if command == "start" or command == "stop":
+                socket_control_q.put(command)
+            else:
+                # command is to close
+                # drain all qs and break
+                for idx, q in enumerate(qs):
+                    # drain the q
+                    while True:
+                        try:
+                            _ = q.get(block=False)
+                            logger.debug(f"SHUTTING DOWN: q{idx} drained")
+                        except queue.Empty:
+                            break
+                break
         events = sel.select(timeout=0)
         for key, mask in events:
             callback = key.data
-            callback(key.fileobj, mask, settings, logger, qs)
+            callback(
+                key.fileobj,
+                mask,
+                settings,
+                logger,
+                qs,
+                command_q,
+                socket_control_q,
+            )
 
 
 def get_packets(
-    sock, mask, settings: Dict, logger: logging.Logger, qs: List
+    sock,
+    mask,
+    settings: Dict,
+    logger: logging.Logger,
+    qs: List,
+    command_q: queue.Queue,
+    socket_control_q: queue.Queue,
 ) -> None:
     print("\n")
     data_packet, sensor_ip = sock.recvfrom(1024)
@@ -59,23 +94,19 @@ def get_packets(
             # load the sensors assigned queue
             q = qs[idx]
 
-            # lock.acquire()
             # drain the q
             while True:
                 try:
-                    old = q.get(block=False)
+                    _ = q.get(block=False)
                 except queue.Empty:
                     break
             # put new data in q
             q.put(data_packet, block=False)
             logger.debug(f"data put in q{idx}")
-            # lock.release()
 
-            if (
-                input["name"] == "controller"
-                and data_packet[1].decode() == "close"
-            ):
-                logger.info("closing program")
+            if input["name"] == "controller":
+                # logger.info(data_packet[1].decode())
+                command_q.put(data_packet[1].decode())
 
 
 def main() -> None:
@@ -92,17 +123,38 @@ def main() -> None:
     logger = debug_logger.init_logger(__name__, debug_level, log_name)
     # logger_pass_queue.put(logger)
     qs = create_queues(len(settings["inputs"]), logger)
-
+    command_q: queue.SimpleQueue = queue.SimpleQueue()
+    socket_control_q: queue.SimpleQueue = queue.SimpleQueue()
+    # video_control_q: queue.SimpleQueue = queue.SimpleQueue()
     server_thread = threading.Thread(
         name="socket_server",
         target=socket_server,
-        args=(settings, logger, qs),
+        args=(settings, logger, qs, command_q, socket_control_q),
     )
     server_thread.start()
 
     start_time = datetime.datetime.now()
+    log = False
 
     while True:
+        if not command_q.empty():
+            command = command_q.get(block=False)
+            logger.warning(f"COMMAND RECEIVED: {command}")
+
+            if command == "start":
+                log = True
+                logger.warning(f"LOG_STATUS: {log}")
+            elif command == "stop":
+                log = False
+                logger.warning(f"LOG_STATUS: {log}")
+            elif command == "close":
+                logger.warning(f"SHUTTING DOWN: {log}")
+                socket_control_q.put(None)
+                # video_control_q.put(None)
+                break
+            else:
+                pass
+
         current_time = datetime.datetime.now()
 
         if current_time - start_time > log_length:
@@ -115,17 +167,7 @@ def main() -> None:
         else:
             logger = logger
 
-        # logger.info(datetime.datetime.now())
-        # time.sleep(1)
-
-    #     msg = log_queue.get()
-    #     if msg == None:
-    #         logger.warning("breaking")
-    #         break
-    #     else:
-    #         logger.info(f"message rec {msg}")
-
-    # server_thread.join()
+    server_thread.join()
 
 
 if __name__ == "__main__":
