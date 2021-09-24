@@ -8,10 +8,10 @@ from pathlib import Path
 def get_new_log_file_name(folder: str, prefix: str, ext: str):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     folder = folder.replace(" ", "_")
-    file_path = Path(folder).mkdir(parents=True, exist_ok=True)
+    Path(folder).mkdir(parents=True, exist_ok=True)
     file_path = Path(folder)
     file_name = f"{prefix}_{timestamp}.{ext}".replace(" ", "_")
-    file_name = file_path / file_name
+    file_name = file_path / file_name  # type: ignore
     return file_name
 
 

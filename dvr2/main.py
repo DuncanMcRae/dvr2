@@ -17,20 +17,8 @@ def read_config_file(config: str) -> Dict:
         return json.load(f)
 
 
-def create_queues(count, logger):
-    """the program is multi-processing, so needs a means to pass information
-    from one CPU to another; queues are utilised here to do this.
-
-    each queue has a maximum length of 1 so that it:
-    -always has the latest information
-    -can be checked to see if it is empty
-    Args:
-        _count (integer): the number of queues to make
-        _logger (logging instance): for writing to the debug
-    Returns:
-        [list]: containing all the multi-processing queues
-    """
-    queues = []
+def create_queues(count: int, logger: logging.Logger) -> List:
+    queues: List[multiprocessing.Queue] = []
     for num in range(count):
         queues.append(multiprocessing.Queue(maxsize=1))
         logger.info(f"q{num} added to queue")
@@ -51,19 +39,10 @@ def socket_server(settings: Dict, logger: logging.Logger, qs: List) -> None:
             callback(key.fileobj, mask, settings, logger, qs)
 
 
-def get_packets(sock, mask, settings, logger, qs):
+def get_packets(
+    sock, mask, settings: Dict, logger: logging.Logger, qs: List
+) -> None:
     print("\n")
-    """called when the selector registers a socket has data ready for reading,
-    this method then grabs the byte data and puts it in to the correct queue
-
-    Args:
-        _sock (socket): the UDP connection (ip and port)
-        _mask (int): not used (but 1 = EVENT_READ and 2 = EVENT_WRITE)
-        _lock (multi-processing Lock): used to stop run-time errors happening when one process tries to get
-        _qs (list): of the queues for passing between processes - one queue per input
-        _settings (json object): package configuration file
-        _logger (logging instance): for writing to the debug
-    """
     data_packet, sensor_ip = sock.recvfrom(1024)
     sensor_port = sock.getsockname()[1]
     logger.info(
@@ -99,7 +78,7 @@ def get_packets(sock, mask, settings, logger, qs):
                 logger.info("closing program")
 
 
-def main():
+def main() -> None:
     settings = read_config_file("config.json")
     debug_level = settings["debug_level"]
     log_length = settings["log_length"]
